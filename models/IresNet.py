@@ -48,7 +48,6 @@ def correlation(x, y, max_disp):
     corr_tensor = torch.stack(corr_tensor)
     return corr_tensor.permute(1, 2, 3, 0)
 
-#
 # class BasicBlock(nn.Module):
 #     def __init__(self, in_channel, out_channel, kernel_size, stride, downsample, pad, dilation):
 #         super().__init__()
@@ -70,20 +69,10 @@ def correlation(x, y, max_disp):
 #         out = x + out
 #         return out
 
-class disparityregression(nn.Module):
-    def __init__(self, maxdisp):
-        super().__init__()
-        self.disp = torch.FloatTensor(np.reshape(np.array(range(maxdisp)), [1, maxdisp, 1, 1])).cuda()
-
-    def forward(self, x):
-        disp = self.disp.repeat(x.size()[0], 1, x.size()[2], x.size()[3])
-        out = torch.sum(x * disp, 1)
-        return out
-
-class featuresExtraction(nn.Module):
+class featuresExtraction_disparityRegression(nn.Module):
     def __init__(self):
-        super(featuresExtraction, self).__init__()
-        self.conv = torch.nn.Sequential()
+        super(featuresExtraction_disparityRegression, self).__init__()
+        self.conv = nn.Sequential()
         self.add_module("ReLU", nn.LeakyReLU(negative_slope=0.1, inplace=True))
         self.add_module("conv1",convbn_relu(3, 64, 7, 2, 3, 1))
         self.add_module("conv2", convbn_relu(64, 128, 5, 2, 2, 1))
@@ -96,7 +85,11 @@ class featuresExtraction(nn.Module):
         self.add_module("conv5_1", convbn_relu(512, 512, 3, 1, 1, 1))
         self.add_module("conv6", convbn_relu(512, 1024, 3, 2, 1, 1))
         self.add_module("conv6_1", convbn_relu(1024, 1024, 3, 1, 1, 1))
+        self.add_module("Convolution1", convbn(1024, 1, 3, 1, 1, 1))
+        self.add_module("deconv5", nn.ConvTranspose2d(1024, 512, 4, 2, 1))
+        self.add_module("upsample_flow6to5", nn.ConvTranspose2d(1, 1, 4, 2, 1))
     def forward(self, Limg, Rimg):
+        #feature Extraction
         L = self.conv1(Limg)
         R = self.conv1(Rimg)
         L = self.conv2(L)
@@ -105,14 +98,18 @@ class featuresExtraction(nn.Module):
         conv_redir = self.conv_redir(L)
         output = torch.cat((corr, conv_redir),1)
         output = self.conv3(output)
-        output = self.conv3_1(output)
-        output = self.conv4(output)
-        output = self.conv4_1(output)
-        output = self.conv5(output)
-        output = self.conv5_1(output)
-        output = self.conv6(output)
-        output = self.conv6_1(output)
+        conv3_1= self.conv3_1(output)
+        output = self.conv4(conv3_1)
+        conv4_1 = self.conv4_1(output)
+        output = self.conv5(conv4_1)
+        conv5_1 = self.conv5_1(output)
+        output = self.conv6(conv5_1)
+        conv6_1 = self.conv6_1(output)
+        #disparity regression
+        #(6-1)
+        predict_flow6 = self.Convolution1(conv6_1)
+        deconv5 = self.deconv5(conv6_1)
+        deconv5 = self.ReLU(deconv5)
+        upsampled_flow6_to_5 = self.upsample_flow6to5(predict_flow6)
 
         return output
-
-
