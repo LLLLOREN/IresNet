@@ -106,7 +106,7 @@ class featuresExtraction(nn.Module):
         self.add_module("conv5", convbn_relu(512, 512, 3, 2, 1, 1))
         self.add_module("conv5_1", convbn_relu(512, 512, 3, 1, 1, 1))
         self.add_module("conv6", convbn_relu(512, 1024, 3, 2, 1, 1))
-        self.add_module("conv6_1", convbn_relu(1024, 1024, 33, 1, 1, 1))
+        self.add_module("conv6_1", convbn_relu(1024, 1024, 3, 1, 1, 1))
     def forward(self, Limg, Rimg):
         L = self.conv1(Limg)
         R = self.conv1(Rimg)
