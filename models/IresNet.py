@@ -33,17 +33,6 @@ def convbn_relu(in_channel, out_channel, kernel_size, stride, pad, dilation):
         nn.LeakyReLU(negative_slope = 0.1))
 
 
-def convbn_3d(in_channel, out_channel, kernel_size, stride, pad):
-
-    return nn.Sequential(
-        nn.Conv3d(
-            in_channel,
-            out_channel,
-            kernel_size = kernel_size,
-            padding=pad,
-            stride = stride),
-        nn.BatchNorm3d(out_channel))
-
 def correlation(x, y, max_disp):
     w = y.size()[2]
     w = torch.Tensor()
