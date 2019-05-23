@@ -48,27 +48,6 @@ def correlation(x, y, max_disp):
     corr_tensor = torch.stack(corr_tensor)
     return corr_tensor.permute(1, 2, 3, 0)
 
-# class BasicBlock(nn.Module):
-#     def __init__(self, in_channel, out_channel, kernel_size, stride, downsample, pad, dilation):
-#         super().__init__()
-#         self.conv1 = nn.Sequential(
-#             convbn(in_channel, out_channel, kernel_size, stride, pad, dilation),
-#             nn.LeakyReLU(negative_slope=0.1, inplace=True))
-#         # self.conv2 = nn.Sequential(convbn(out_channel, out_channel, 3, 1, pad, dilation))
-#         self.downsample = downsample
-#         self.stride = stride
-#
-#     def forward(self, x):
-#         out = self.conv1(x)
-#
-#         # out = self.conv2(out)
-#
-#         if self.downsample is not None:
-#             x = self.downsample(x)
-#
-#         out = x + out
-#         return out
-
 class iresNet(nn.Module):
     def __init__(self):
         super(iresNet, self).__init__()
@@ -95,12 +74,12 @@ class iresNet(nn.Module):
         self.add_module("deconv5", nn.ConvTranspose2d(1024, 512, 4, 2, 1))
         #(5-1)
         self.add_module("Convolution2",convbn(1025, 512, 3, 1, 1, 1))
-        self.add_module("Convolution3", convbn(512, 512, 3, 1, 1, 1))
+        self.add_module("Convolution3", convbn(512, 1, 3, 1, 1, 1))
         #(5-2)
         self.add_module("deconv4", nn.ConvTranspose2d(512, 256, 4, 2, 1))
         #(4-1)
         self.add_module("Convolution4", convbn(769, 256, 3, 1, 1, 1))
-        self.add_module("Convolution5", convbn(256, 256, 3, 1, 1, 1))
+        self.add_module("Convolution5", convbn(256, 1, 3, 1, 1, 1))
         #(4-2)
         self.add_module("deconv3", nn.ConvTranspose2d(256, 128, 4, 2, 1))
         #(3-1)
@@ -118,15 +97,21 @@ class iresNet(nn.Module):
         self.add_module("Convolution11", convbn(32, 1, 3, 1, 1, 1))
 
         #Multi-Scale-Full-Disparity
+        # skip connections
+        self.add_module("upconv11", nn.ConvTranspose2d(64, 32, 4, 2, 1))
+        self.add_module("upconv21", nn.ConvTranspose2d(128, 32, 8, 4, 2))
+        self.add_module("upconv12", convbn_relu(64, 32, 1, 1, 0, 1))
+        # upsample disparity
+
 
     def forward(self, Limg, Rimg):
 
         #feature Extraction
         conv1a = self.conv1(Limg)
-        R = self.conv1(Rimg)
+        conv1b = self.conv1(Rimg)
         conv2a = self.conv2(conv1a)
-        R = self.conv2(R)
-        corr = correlation(conv2a, R, 40)
+        conv2b = self.conv2(conv1b)
+        corr = correlation(conv2a, conv2b, 40)
         conv_redir = self.conv_redir(conv2a)
         output = torch.cat((corr, conv_redir),1)
         output = self.conv3(output)
@@ -182,4 +167,8 @@ class iresNet(nn.Module):
         predict_flow = self.Convolution11(output)
 
         #Multi-Scale-Full-Disparity
+        up_conv1a = self.upconv11(conv1a)
+        up_conv1b = self.upconv11(conv1b)
+        up_conv1a = self.ReLU(up_conv1a)
+        up_conv1b = self.ReLu(up_conv1b)
         return output
