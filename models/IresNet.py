@@ -101,8 +101,13 @@ class iresNet(nn.Module):
         self.add_module("upconv11", nn.ConvTranspose2d(64, 32, 4, 2, 1))
         self.add_module("upconv21", nn.ConvTranspose2d(128, 32, 8, 4, 2))
         self.add_module("upconv12", convbn_relu(64, 32, 1, 1, 0, 1))
-        # upsample disparity
 
+        # main branch
+        self.add_module("deconv0", nn.ConvTranspose2d(32, 32, 4, 2, 1))
+
+        # predict
+        self.add_module("Convolution21", convbn(65, 32, 3, 1, 1, 1))
+        self.add_module("Convolution22", convbn(32, 1, 3, 1, 1, 1))
 
     def forward(self, Limg, Rimg):
 
@@ -171,4 +176,24 @@ class iresNet(nn.Module):
         up_conv1b = self.upconv11(conv1b)
         up_conv1a = self.ReLU(up_conv1a)
         up_conv1b = self.ReLu(up_conv1b)
+        up_conv2a = self.upconv21(conv2a)
+        up_conv2b = self.upconv21(conv2b)
+        up_conv2a = self.ReLU(up_conv2a)
+        up_conv2b = self.ReLU(up_conv2b)
+        concat_up_conv1a2a = torch.cat((up_conv1a, up_conv2a), 1)
+        concat_up_conv1b2b = torch.cat((up_conv1b, up_conv2b), 1)
+        up_conv1a2a = self.upconv12(concat_up_conv1a2a)
+        up_conv1b2b = self.upconv12(concat_up_conv1b2b)
+
+        #upsample disparity
+        upsampled_flow = self.upsample_flow(predict_flow)
+
+        #main branch
+        deconv = self.deconv0(concat)
+        deconv = self.ReLU(deconv)
+        output = torch.cat((up_conv1a2a, deconv, upsampled_flow))
+
+        # predict
+        concat = self.Convolution21(output)
+        predict_flow = self.Convolution22(concat)
         return output
