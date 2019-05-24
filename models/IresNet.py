@@ -57,6 +57,12 @@ class iresNet(nn.Module):
         self.add_module("ReLU", nn.LeakyReLU(negative_slope=0.1, inplace=True))
         self.add_module("conv1",convbn_relu(3, 64, 7, 2, 3, 1))
         self.add_module("conv2", convbn_relu(64, 128, 5, 2, 2, 1))
+        #for corr
+        self.add_module("corr_conv3", convbn_relu(128, 256, 3, 2, 1, 1))
+        self.add_module("corr_conv3_1", convbn_relu(256, 256, 3, 1, 1, 1))
+        self.add_module("corr_deconv3", nn.ConvTranspose2d(256, 128, 4, 2, 1))
+        self.add_module("corr_fusion2", convbn_relu(256, 128, 3, 1, 1, 1))
+
         self.add_module("conv_redir", convbn_relu(128, 64, 1, 1, 0, 1))
         self.add_module("conv3", convbn_relu(145, 256, 5, 2, 2, 1))
         self.add_module("conv3_1", convbn_relu(256, 256, 3, 1, 1, 1))
@@ -109,6 +115,15 @@ class iresNet(nn.Module):
         self.add_module("Convolution21", convbn(65, 32, 3, 1, 1, 1))
         self.add_module("Convolution22", convbn(32, 1, 3, 1, 1, 1))
 
+        self.add_module("subupsample_felow6", nn.ConvTranspose2d(1, 1, 128, 64, 32))
+        self.add_module("subupsample_felow5", nn.ConvTranspose2d(1, 1, 64, 32, 16))
+        self.add_module("subupsample_felow4", nn.ConvTranspose2d(1, 1, 32, 16, 8))
+        self.add_module("subupsample_felow3", nn.ConvTranspose2d(1, 1, 16, 8, 4))
+        self.add_module("subupsample_felow2", nn.ConvTranspose2d(1, 1, 8, 4, 2))
+        self.add_module("subupsample_felow1", nn.ConvTranspose2d(1, 1, 4, 2, 1))
+        self.add_module("Convolution_predict_from_multi_res", convbn(6, 1, 1, 1, 0, 1))
+        self.add_module("NegReLU", nn.LeakyReLU(negative_slope=0, inplace=True))
+
     def forward(self, Limg, Rimg):
 
         #feature Extraction
@@ -116,7 +131,21 @@ class iresNet(nn.Module):
         conv1b = self.conv1(Rimg)
         conv2a = self.conv2(conv1a)
         conv2b = self.conv2(conv1b)
-        corr = correlation(conv2a, conv2b, 40)
+        #for corr
+        corr_conv3a = self.corr_conv3(conv2a)
+        corr_conv3b = self.corr_conv3(conv2b)
+        corr_conv3_1a = self.corr_conv3_1(corr_conv3a)
+        corr_conv3_1b = self.corr_conv3_1(corr_conv3b)
+        corr_deconv3a = self.corr_deconv3(corr_conv3_1a)
+        corr_deconv3b = self.corr_deconv3(corr_conv3_1b)
+        corr_deconv3a = self.ReLU(corr_deconv3a)
+        corr_deconv3a = self.ReLU(corr_deconv3b)
+        concat_edcorr_2a = torch.cat((corr_deconv3a, conv2a))
+        concat_edcorr_2b = torch.cat((corr_deconv3b, conv2b))
+        edcorr_2a = self.corr_fusion2(concat_edcorr_2a)
+        edcorr_2b = self.corr_fusion2(concat_edcorr_2b)
+
+        corr = correlation(edcorr_2a, edcorr_2b, 40)
         conv_redir = self.conv_redir(conv2a)
         output = torch.cat((corr, conv_redir),1)
         output = self.conv3(output)
@@ -127,49 +156,64 @@ class iresNet(nn.Module):
         conv5_1 = self.conv5_1(output)
         output = self.conv6(conv5_1)
         conv6_1 = self.conv6_1(output)
+        #features extraction finished
 
         #disparity regression
         #(6-1) regression 12*6 --loss for disparity
         predict_flow = self.Convolution1(conv6_1)
+        subupsampled_flow6 = self.subupsample_felow6(predict_flow)
+        subupsampled_flow6 = self.ReLU(subupsampled_flow6)
         deconv = self.deconv5(conv6_1)
         deconv = self.ReLU(deconv)
         upsampled_flow = self.upsample_flow(predict_flow)
-        output = torch.cat((conv5_1, deconv, upsampled_flow))
+        output = torch.cat([conv5_1, deconv, upsampled_flow])
         #(5-1) 24*12 --loss for disparity
         concat = self.Convolution2(output)
-        predict_flow = self.Convolution3(concat)
+        predict_flow5 = self.Convolution3(concat)
+        subupsampled_flow5 = self.subupsample_felow5(predict_flow)
+        subupsampled_flow5 = self.ReLU(subupsampled_flow5)
         #(5-2) 24*12 --prepare features for next stage
         deconv = self.deconv4(concat)
         deconv = self.ReLU(deconv)
-        upsampled_flow = self.upsample_flow(predict_flow)
-        output = torch.cat((conv4_1, deconv, upsampled_flow))
+        upsampled_flow = self.upsample_flow(predict_flow5)
+        output = torch.cat([conv4_1, deconv, upsampled_flow])
         #(4-1) 48*24 --loss for disparity
         concat = self.Convolution4(output)
         predict_flow = self.Convolution5(concat)
+        subupsampled_flow4 = self.subupsample_felow4(predict_flow)
+        subupsampled_flow4 = self.ReLU(subupsampled_flow4)
         #(4-2) 48*24 --prepare features for next stage
         deconv = self.deconv3(concat)
         deconv = self.ReLU(deconv)
         upsampled_flow = self.upsample_flow(predict_flow)
-        output = torch.cat((conv3_1, deconv, upsampled_flow))
+        output = torch.cat([conv3_1, deconv, upsampled_flow])
         #(3-1) regression 96*48 --loss for diparity
         concat = self.Convolution6(output)
         predict_flow = self.Convolution7(concat)
+        subupsampled_flow3 = self.subupsample_felow3(predict_flow)
+        subupsampled_flow3 = self.ReLU(subupsampled_flow3)
         #(3-2) regression 96*48 --prepare features for next stage
         deconv = self.deconv2(concat)
         deconv = self.ReLU(deconv)
         upsampled_flow = self.upsample_flow(predict_flow)
-        output = torch.cat((conv2a, deconv, upsampled_flow))
+        output = torch.cat([conv2a, deconv, upsampled_flow])
         # (2-1) regression 192*96 -- loss for disparity
         concat = self.Convolution8(output)
         predict_flow = self.Convolution9(concat)
+        subupsampled_flow2 = self.subupsample_felow2(predict_flow)
+        subupsampled_flow2 = self.ReLU(subupsampled_flow2)
         # (2-2) regression 192*96 -- prepare features for next stage
         deconv = self.deconv1(concat)
         deconv = self.ReLU(deconv)
         upsampled_flow = self.upsample_flow(predict_flow)
-        output = torch.cat((conv2a, deconv, upsampled_flow))
+        output = torch.cat([conv2a, deconv, upsampled_flow])
         # (1-1) regression 384*192 -- loss for disparity
         concat = self.Convolution10(output)
-        predict_flow = self.Convolution11(output)
+        predict_flow1 = self.Convolution11(output)
+        subupsampled_flow1 = self.subupsample_felow1(predict_flow)
+        subupsampled_flow1 = self.ReLU(subupsampled_flow1)
+
+
 
         #Multi-Scale-Full-Disparity
         up_conv1a = self.upconv11(conv1a)
@@ -180,13 +224,13 @@ class iresNet(nn.Module):
         up_conv2b = self.upconv21(conv2b)
         up_conv2a = self.ReLU(up_conv2a)
         up_conv2b = self.ReLU(up_conv2b)
-        concat_up_conv1a2a = torch.cat((up_conv1a, up_conv2a), 1)
-        concat_up_conv1b2b = torch.cat((up_conv1b, up_conv2b), 1)
+        concat_up_conv1a2a = torch.cat([up_conv1a, up_conv2a], 1)
+        concat_up_conv1b2b = torch.cat([up_conv1b, up_conv2b], 1)
         up_conv1a2a = self.upconv12(concat_up_conv1a2a)
         up_conv1b2b = self.upconv12(concat_up_conv1b2b)
 
         #upsample disparity
-        upsampled_flow = self.upsample_flow(predict_flow)
+        upsampled_flow = self.upsample_flow(predict_flow1)
 
         #main branch
         deconv = self.deconv0(concat)
@@ -196,4 +240,15 @@ class iresNet(nn.Module):
         # predict
         concat = self.Convolution21(output)
         predict_flow = self.Convolution22(concat)
+
+        # concat multi-res prediction
+        concat_a = torch.cat([subupsampled_flow6,
+                              subupsampled_flow5,
+                              subupsampled_flow4,
+                              subupsampled_flow3,
+                              subupsampled_flow2,
+                              subupsampled_flow1])
+        final_prediction = self.Convolution_predict_from_multi_res(concat)
+        final_prediction = self.NegReLU(final_prediction)
+
         return output
