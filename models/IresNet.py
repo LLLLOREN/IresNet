@@ -16,8 +16,7 @@ def convbn(in_channel, out_channel, kernel_size, stride, pad, dilation):
             kernel_size=kernel_size,
             stride=stride,
             padding=dilation if dilation > 1 else pad,
-            dilation=dilation),
-        nn.BatchNorm2d(out_channel))
+            dilation=dilation))
 
 
 def correlation(x, y, max_disp):
@@ -35,9 +34,9 @@ def correlation(x, y, max_disp):
     corr_tensor = torch.stack(corr_tensor)
     return corr_tensor.permute(1, 2, 3, 0)
 
-class iresNet(nn.Module):
+class basisiResNet(nn.Module):
     def __init__(self):
-        super(iresNet, self).__init__()
+        super(basisiResNet, self).__init__()
         #features extraction
         self.conv1 = nn.Sequential(convbn(3, 64, 7, 2, 3, 1),
                                    nn.LeakyReLU(negative_slope=0.1))
@@ -133,7 +132,7 @@ class iresNet(nn.Module):
                                                 nn.LeakyReLU(negative_slope=0.1))
         self.subupsample_felow1 = nn.Sequential(nn.ConvTranspose2d(1, 1, 4, 2, 1),
                                                 nn.LeakyReLU(negative_slope=0.1))
-        self.Convolution_predict_from_multi_res = nn.Sequential(convbn(6, 1, 1, 1, 0, 1),
+        self.Convolution_predict_from_multi_res = nn.Sequential(convbn(7, 1, 1, 1, 0, 1),
                                                                 nn.LeakyReLU(negative_slope=0, inplace=True))
 
     def forward(self, Limg, Rimg):
@@ -235,7 +234,7 @@ class iresNet(nn.Module):
 
         # predict
         concat = self.Convolution21(output)
-        predict_flow = self.Convolution22(concat)
+        predict_flow0 = self.Convolution22(concat)
 
         # concat multi-res prediction
         concat_a = torch.cat([subupsampled_flow6,
@@ -243,9 +242,15 @@ class iresNet(nn.Module):
                               subupsampled_flow4,
                               subupsampled_flow3,
                               subupsampled_flow2,
-                              subupsampled_flow1])
-        final_prediction = self.Convolution_predict_from_multi_res(concat)
+                              subupsampled_flow1,
+                              predict_flow0])
+        final_prediction = self.Convolution_predict_from_multi_res(concat_a)
 
-        return output
+        return final_prediction,conv1a, conv1b, up_conv1b2b
 
-#test
+class refinementSub(nn.Module):
+    def __init__(self, conv1a, conv1b, final_prediction):
+        super(refinementSub,self).__init__()
+        self.conv1a = conv1a
+        self.conv1b = conv1b
+        self.input = final_prediction
