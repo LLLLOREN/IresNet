@@ -18,7 +18,56 @@ def conv(in_channel, out_channel, kernel_size, stride, pad, dilation = 1):
             stride=stride,
             padding=dilation if dilation > 1 else pad,
             dilation=dilation))
+def mask_fill_inf(matrix, mask):
+    negmask = 1 - mask
+    num = 3.4 * math.pow(10, 38)
+    return (matrix * mask) + (-((negmask * num + num) - num))
 
+def warp_img(img, disp):
+    b = img.size(0)
+    h = img.size(1)
+    w = img.size(2)
+    c = img.size(3)
+
+    disp = torch.squeeze(disp)
+
+    def _warp(i):
+        w1 = range(w)
+        h1 = range(h)
+        x, y = torch.meshgrid(w1, h1)
+        x_f = x.float()
+        x_f -= disp[i]
+        x0_f = torch.floor(x_f)
+        x1_f = x0_f + 1
+
+        w0 = x1_f - x_f
+        w0 = torch.unsqueeze(w0, 2)
+        w1 = x_f - x0_f
+        w1 = torch.unsqueeze(w1, 2)
+
+        x_0 = torch.zeros(size=[h, w],dtype=torch.float32)
+        x_w = torch.ones(size=[h, w],dtype=torch.float32) * (w - 1).to_float()
+        x0_f = torch.where(x0_f < 0, x_0, x0_f)
+        x0_f = torch.where(x0_f > (w - 1).to_float, x_w, x0_f)
+        x1_f = torch.where(x1_f < 0, x_0, x1_f)
+        x1_f = torch.where(x1_f > (w - 1).to_float, x_w, x1_f)
+
+        x0_f = torch.unsqueeze(x0_f, 2)
+        x1_f = torch.unsqueeze(x1_f, 2)
+        y = torch.unsqueeze(y, 2)
+        indices = torch.cat([y, (x0_f).int], 2)
+        indices = torch.reshape(indices, [-1, 2])
+        iml = torch.gather(img[i], indices)
+        indices = torch.cat([y, (x1_f).int], 2)
+        indices = torch.reshape(indices, [-1, 2])
+        imr = torch.gather(img[i], indices)
+
+        res = w0 * torch.reshape(iml, [h, w, c]) + w1 * torch.reshape(imr, [h, w, c])
+        return res
+
+    ret = mask_fill_inf(torch.tensor(_warp),b.range())
+    ret = torch.reshape(ret, [b, h, w, c])
+    return ret
 
 class basisiResNet(nn.Module):
     def __init__(self):
