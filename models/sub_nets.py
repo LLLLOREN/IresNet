@@ -264,7 +264,7 @@ class refinementSub(nn.Module):
                                                nn.LeakyReLU(negative_slope=0.1))
         self.ires_upsample_2to1_itr1 = nn.Sequential(nn.ConvTranspose2d(1, 1, 4, 2, 1))
         ###predict res1
-        self.ires_fused1_itr1 = nn.Sequential(conv(192, 64, 3, 1, 1))
+        self.ires_fused1_itr1 = nn.Sequential(conv(96, 64, 3, 1, 1))
         self.ires_convolution1_itr1 = nn.Sequential(conv(64, 1, 3, 1, 1))
         self.ires_deconv1_itr1 = nn.Sequential(nn.ConvTranspose2d(64, 32, 4, 2, 1),
                                                nn.LeakyReLU(negative_slope=0.1))

@@ -26,5 +26,3 @@ class iresNet(nn.Module):
         predict_disp_final_itr2 = Eltwise(predict_disp_resize_itr2)
 
         return predict_disp_final_itr2
-
-
