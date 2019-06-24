@@ -7,6 +7,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import math
 import numpy as np
+import skimage
 from .layers import *
 from .sub_nets import *
 
@@ -15,13 +16,15 @@ class iresNet(nn.Module):
         super(iresNet, self).__init__()
         self.basisResNet = basisiResNet()
         self.refinementSub= refinementSub()
+        self.prepareInput = prepareInput()
         self.Eltwise_disp_itr2 = nn.Sequential(Eltwise())
 
 
-    def forward(self, leftImg,rightImg):
+    def forward(self, leftImg,rightImg, disp_L):
         final_prediction,conv1a, conv1b, up_conv1b2b = self.basisResNet(leftImg, rightImg)
-        ires_predict0_itr1 = self.refinementSub(final_prediction,conv1a, conv1b, up_conv1b2b)
-        ires_predict0_itr2 = self.refinementSub(ires_predict0_itr1,conv1a, conv1b, up_conv1b2b)
+        v_flow0, corr_mini = self.prepareInput(final_prediction, conv1a, conv1b)
+        ires_predict0_itr1 = self.refinementSub(final_prediction, v_flow0, corr_mini, up_conv1b2b)
+        ires_predict0_itr2 = self.refinementSub(ires_predict0_itr1, v_flow0, corr_mini, up_conv1b2b)
         predict_disp_resize_itr2 = nn.Sequential(F.upsample(ires_predict0_itr2,mode='linear'))
         predict_disp_final_itr2 = Eltwise(predict_disp_resize_itr2)
 

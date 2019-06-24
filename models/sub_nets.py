@@ -7,6 +7,9 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import math
 import numpy as np
+from skimage import transform
+import skimage
+import skimage.io
 from .layers import *
 
 
@@ -228,18 +231,34 @@ class basisiResNet(nn.Module):
 
         return final_prediction,conv1a, conv1b, up_conv1b2b
 
+class prepareInput(nn.Module):
+    def __init__(self):
+        super(prepareInput, self).__init__()
+        self.concat = nn.Sequential(Concat())
+        self.concat2 = nn.Sequential(Concat(1))
+
+        # iteration1 --share
+        # prepare input
+        self.v_flow0 = nn.Sequential(Scale(1))
+        self.compress_conv1a1b = nn.Sequential(conv(64, 16, 3, 1, 1),
+                                               nn.LeakyReLU(negative_slope=0.1))
+        self.corr_min = nn.Sequential(corr(40, 1, 40, 1, 1))
+
+    def forward(self, final_prediction_n,conv1a, conv1b):
+        v_flow0 = self.v_flow0(final_prediction_n)
+        conv1a_mini = self.compress_conv1a1b(conv1a)
+        conv1b_mini = self.compress_conv1a1b(conv1b)
+        corr_mini = self.corr_mini(conv1a_mini, conv1b_mini)
+
+        return v_flow0, corr_mini
+
+
 class refinementSub(nn.Module):
     def __init__(self):
         super(refinementSub,self).__init__()
 
         self.concat = nn.Sequential(Concat())
         self.concat2 = nn.Sequential(Concat(1))
-        #iteration1 --share
-        #prepare input
-        self.v_flow0 = nn.Sequential(Scale(1))
-        self.compress_conv1a1b = nn.Sequential(conv(64, 16,3,1,1),
-                                               nn.LeakyReLU(negative_slope=0.1))
-        self.corr_min = nn.Sequential(corr(40, 1, 40, 1, 1))
         # iresnet
         ### itration 1 --changing
         self.FlowWarp0_itr1 = nn.Sequential(FlowWarp())
@@ -275,11 +294,7 @@ class refinementSub(nn.Module):
         self.sumation_initial_res0_itr1 = nn.Sequential(Eltwise(),
                                                         nn.LeakyReLU(negative_slope=0))
 
-    def forward(self, x,conv1a, conv1b, up_conv1b2b):
-        v_flow0 = self.v_flow0(x)
-        conv1a_mini = self.compress_conv1a1b(conv1a)
-        conv1b_mini = self.compress_conv1a1b(conv1b)
-        corr_mini = self.corr_mini(conv1a_mini, conv1b_mini)
+    def forward(self, x,v_flow0, corr_mini, up_conv1b2b, disp_L):
         # iresnet
         # itration 1 --changing
         disp2flow_final_itr1 = self.concat2([x, v_flow0])
@@ -302,6 +317,13 @@ class refinementSub(nn.Module):
         ires_upsampled_2to1_itr1 = self.ires_upsample_2to1_itr1(ires_predict2_res_itr1)
         ires_concat2_itr1 = self.concat([ires_conv1b_itr1, ires_deconv2_itr1])
 
+        #get loss2
+        ires_predict2_res_itr1_shape = list(ires_predict2_res_itr1.size())
+        ires_initial2_itr1 = skimage.transform.resize(x, ires_predict2_res_itr1_shape[1:3])
+        ires_predict2_res_itr1 = ires_initial2_itr1 + ires_predict2_res_itr1
+        tgt = skimage.transform.resize(disp_L, ires_predict2_res_itr1_shape[1:3])
+        ires_disp_loss2 = np.mean(torch.abs(ires_predict2_res_itr1 - tgt))
+
         #predict res1
         ires_fused1_itr1 = self.ires_fused1_itr1(ires_concat2_itr1)
         ires_predict1_res_itr1 = self.ires_Convolution1_itr1(ires_fused1_itr1)
@@ -309,8 +331,20 @@ class refinementSub(nn.Module):
         ires_upsampled_1to0_itr1 = self.ires_upsample_1to0_itr1(ires_predict1_res_itr1)
         ires_concat1_itr1 = self.concat([ires_conv0_itr1, ires_deconv1_itr1, ires_upsampled_1to0_itr1])
 
+        # get loss1
+        ires_predict1_res_itr1_shape = list(ires_predict1_res_itr1.size())
+        ires_initial1_itr1 = skimage.transform.resize(x, ires_predict1_res_itr1_shape[1:3])
+        ires_predict1_res_itr1 = ires_initial1_itr1 + ires_predict1_res_itr1
+        tgt = skimage.transform.resize(disp_L, ires_predict1_res_itr1_shape[1:3])
+        ires_disp_loss1 = np.mean(torch.abs(ires_predict1_res_itr1 - tgt))
+
         #predict res0
         ires_fused0_itr1 = self.ires_fused0_itr1(ires_concat1_itr1)
         ires_predict0_res_itr1 = self.ires_Convolution0_itr1(ires_fused0_itr1)
         ires_predict0_itr1 = self.sumation_initial_res0_itr1(x, ires_predict0_res_itr1)
+
+        # get loss0?
+        ires_disp_loss0 = np.mean(torch.abs(ires_predict0_res_itr1 - disp_L))
+        error = ires_disp_loss0
+
         return ires_predict0_itr1
